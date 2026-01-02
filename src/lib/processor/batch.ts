@@ -48,6 +48,14 @@ export async function processBatch(): Promise<BatchResult> {
   let processingStartDate: Date;
   try {
     processingStartDate = await getProcessingCursor();
+    logger.info('cursor_loaded','Processing start date 1 from cursor:', {
+      batchId,
+      processingStartDate: processingStartDate
+    });
+    logger.info('cursor_loaded','Processing start date 2 from cursor:', {
+      batchId,
+      processingStartDate: processingStartDate.toISOString()
+    });
   } catch (error) {
     logger.error('batch_error', 'Failed to get processing cursor, using env fallback', {
       batchId,

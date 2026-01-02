@@ -34,7 +34,7 @@ export async function getProcessingCursor(
 
     // First run - initialize with env PROCESSING_START_DATE
     const startDate = new Date(config.business.startDate);
-
+        
     await db.insert(processingCursor).values({
       cursorName,
       lastProcessedDate: startDate,
