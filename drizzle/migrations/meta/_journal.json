@@ -8,6 +8,13 @@
       "when": 1766522426839,
       "tag": "0000_lowly_rogue",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1767378952337,
+      "tag": "0001_flaky_thing",
+      "breakpoints": true
     }
   ]
 }

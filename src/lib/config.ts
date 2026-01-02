@@ -121,7 +121,7 @@ export function getFulfillmentStatuses(): string[] {
   }
 
   if (config.features.enableUnfulfilledStatus) {
-    statuses.push('Unfulfilled');
+    statuses.push('unfulfilled');
   }
 
   if (statuses.length === 0) {

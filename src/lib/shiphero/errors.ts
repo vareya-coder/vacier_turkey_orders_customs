@@ -32,9 +32,10 @@ export class ShipHeroQuotaError extends ShipHeroError {
   constructor(
     message: string,
     public remainingCredits?: number,
-    public retryAfterMs?: number
+    public retryAfterMs?: number,
+    public reason?: 'insufficient_credits' | 'request_limit'
   ) {
-    super(message, 'QUOTA_EXCEEDED', 429, { remainingCredits, retryAfterMs });
+    super(message, 'QUOTA_EXCEEDED', 429, { remainingCredits, retryAfterMs, reason });
     this.name = 'ShipHeroQuotaError';
     Object.setPrototypeOf(this, ShipHeroQuotaError.prototype);
   }

@@ -97,11 +97,11 @@ export interface UpdateLineItemsResponse {
     request_id: string;
     complexity: number;
     order?: Order;
-    user_errors?: Array<{
-      message: string;
-      path?: string[];
-    }>;
   };
+  errors?: Array<{
+    message: string;
+    path?: string[];
+  }>;
 }
 
 export interface AddTagsResponse {
@@ -109,9 +109,8 @@ export interface AddTagsResponse {
     request_id: string;
     complexity: number;
     order?: Order;
-    user_errors?: Array<{
+    errors?: Array<{
       message: string;
-      path?: string[];
     }>;
   };
 }
@@ -127,7 +126,7 @@ export interface OrderFilters {
 
 // Line item update input
 export interface LineItemUpdate {
-  line_item_id: string;
+  id: string;
   customs_value?: string;
   quantity?: number;
   price?: string;

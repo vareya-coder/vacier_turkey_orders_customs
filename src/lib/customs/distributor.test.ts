@@ -32,7 +32,7 @@ describe('Customs Value Distributor', () => {
 
       const value = parseFloat(result[0].newCustomsValue);
       expect(value).toBeGreaterThan(0);
-      expect(value).toBeLessThanOrEqual(8.0); // MAX_ITEM_VALUE
+      expect(value).toBeLessThanOrEqual(5.0); // MAX_ITEM_VALUE
       expect(value).toBeLessThanOrEqual(25.0);
     });
 
@@ -70,8 +70,8 @@ describe('Customs Value Distributor', () => {
       result.forEach((item) => {
         expect(item.isComplimentary).toBe(false);
         const value = parseFloat(item.newCustomsValue);
-        expect(value).toBeGreaterThanOrEqual(0.5); // MIN_ITEM_VALUE
-        expect(value).toBeLessThanOrEqual(8.0); // MAX_ITEM_VALUE
+        expect(value).toBeGreaterThanOrEqual(0.1); // MIN_ITEM_VALUE
+        expect(value).toBeLessThanOrEqual(5.0); // MAX_ITEM_VALUE
       });
     });
 
@@ -92,8 +92,8 @@ describe('Customs Value Distributor', () => {
 
       result.forEach((item) => {
         const value = parseFloat(item.newCustomsValue);
-        expect(value).toBeGreaterThanOrEqual(0.5);
-        expect(value).toBeLessThanOrEqual(8.0);
+        expect(value).toBeGreaterThanOrEqual(0.1);
+        expect(value).toBeLessThanOrEqual(5.0);
       });
     });
   });
@@ -170,7 +170,7 @@ describe('Customs Value Distributor', () => {
       // Should still respect minimum per item
       result.forEach((item) => {
         const value = parseFloat(item.newCustomsValue);
-        expect(value).toBeGreaterThanOrEqual(0.5);
+        expect(value).toBeGreaterThanOrEqual(0.1);
       });
     });
 
@@ -181,9 +181,9 @@ describe('Customs Value Distributor', () => {
 
       const result = distributeCustomsValues(lineItems, 100.0);
 
-      // Should be capped at MAX_ITEM_VALUE (8.0)
+      // Should be capped at MAX_ITEM_VALUE (5.0)
       const value = parseFloat(result[0].newCustomsValue);
-      expect(value).toBeLessThanOrEqual(8.0);
+      expect(value).toBeLessThanOrEqual(5.0);
     });
 
     it('should handle many items (stress test)', () => {
@@ -203,8 +203,8 @@ describe('Customs Value Distributor', () => {
 
       result.forEach((item) => {
         const value = parseFloat(item.newCustomsValue);
-        expect(value).toBeGreaterThanOrEqual(0.5);
-        expect(value).toBeLessThanOrEqual(8.0);
+        expect(value).toBeGreaterThanOrEqual(0.1);
+        expect(value).toBeLessThanOrEqual(5.0);
       });
     });
   });
@@ -212,9 +212,9 @@ describe('Customs Value Distributor', () => {
   describe('Distribution Validation', () => {
     it('should validate correct distribution', () => {
       const distribution = [
-        { lineItemId: '1', newCustomsValue: '7.50', isComplimentary: false },
-        { lineItemId: '2', newCustomsValue: '8.00', isComplimentary: false },
-        { lineItemId: '3', newCustomsValue: '5.00', isComplimentary: false },
+        { lineItemId: '1', newCustomsValue: '4.50', isComplimentary: false },
+        { lineItemId: '2', newCustomsValue: '5.00', isComplimentary: false },
+        { lineItemId: '3', newCustomsValue: '3.00', isComplimentary: false },
         { lineItemId: '4', newCustomsValue: '0.00', isComplimentary: true },
       ];
 
@@ -250,8 +250,8 @@ describe('Customs Value Distributor', () => {
 
     it('should detect values below minimum', () => {
       const distribution = [
-        { lineItemId: '1', newCustomsValue: '0.25', isComplimentary: false }, // Too low
-        { lineItemId: '2', newCustomsValue: '10.00', isComplimentary: false },
+        { lineItemId: '1', newCustomsValue: '0.05', isComplimentary: false }, // Too low (below 0.1)
+        { lineItemId: '2', newCustomsValue: '4.00', isComplimentary: false },
       ];
 
       const validation = validateDistribution(distribution, 25.0);
@@ -262,8 +262,8 @@ describe('Customs Value Distributor', () => {
 
     it('should detect values above maximum', () => {
       const distribution = [
-        { lineItemId: '1', newCustomsValue: '10.00', isComplimentary: false },
-        { lineItemId: '2', newCustomsValue: '9.00', isComplimentary: false }, // Too high
+        { lineItemId: '1', newCustomsValue: '4.00', isComplimentary: false },
+        { lineItemId: '2', newCustomsValue: '6.00', isComplimentary: false }, // Too high (above 5.0)
       ];
 
       const validation = validateDistribution(distribution, 25.0);
@@ -279,9 +279,12 @@ describe('Customs Value Distributor', () => {
         { id: '1', sku: 'PRODUCT-A', price: '50.00', quantity: 1 },
         { id: '2', sku: 'PRODUCT-B', price: '30.00', quantity: 1 },
         { id: '3', sku: 'PRODUCT-C', price: '20.00', quantity: 1 },
+        { id: '4', sku: 'PRODUCT-D', price: '15.00', quantity: 1 },
+        { id: '5', sku: 'PRODUCT-E', price: '10.00', quantity: 1 },
       ];
 
-      const results = Array.from({ length: 10 }, () => distributeCustomsValues(lineItems, 25.0));
+      // With 5 items and 15 EUR max, there's room for variation
+      const results = Array.from({ length: 10 }, () => distributeCustomsValues(lineItems, 15.0));
 
       // Check that we get some variation
       const firstItemValues = results.map((r) => parseFloat(r[0].newCustomsValue));
@@ -323,7 +326,7 @@ describe('Customs Value Distributor', () => {
 
       const total = result.reduce((sum, item) => sum + parseFloat(item.newCustomsValue), 0);
       expect(total).toBeLessThanOrEqual(25.01);
-      expect(total).toBeGreaterThan(20); // Should use most of the allowance
+      expect(total).toBeGreaterThan(10); // Should use a good portion of allowance (max 15 with 3 items @ 5.0 each)
 
       const validation = validateDistribution(result, 25.0);
       expect(validation.valid).toBe(true);
@@ -346,7 +349,108 @@ describe('Customs Value Distributor', () => {
       const paidItem = result.find((item) => item.lineItemId === 'li_1');
       const value = parseFloat(paidItem?.newCustomsValue || '0');
       expect(value).toBeGreaterThan(0);
-      expect(value).toBeLessThanOrEqual(8.0);
+      expect(value).toBeLessThanOrEqual(5.0);
+    });
+  });
+
+  describe('Order-Level Discount Scenarios', () => {
+    it('should handle discounted order (below 25 EUR)', () => {
+      const lineItems: LineItemInput[] = [
+        { id: '1', sku: 'PRODUCT-A', price: '50.00', quantity: 1 },
+        { id: '2', sku: 'PRODUCT-B', price: '30.00', quantity: 1 },
+      ];
+
+      // Order has 80 EUR items but -65 EUR discount → 15 EUR final
+      const discountedMaxTotal = 15.0;
+
+      const result = distributeCustomsValues(lineItems, discountedMaxTotal);
+
+      expect(result).toHaveLength(2);
+
+      const total = result.reduce((sum, item) => sum + parseFloat(item.newCustomsValue), 0);
+      expect(total).toBeLessThanOrEqual(15.01);
+      expect(total).toBeGreaterThan(0);
+
+      // Should still respect minimum per item (0.1)
+      result.forEach((item) => {
+        const value = parseFloat(item.newCustomsValue);
+        expect(value).toBeGreaterThanOrEqual(0.1);
+        expect(value).toBeLessThanOrEqual(5.0);
+      });
+    });
+
+    it('should handle very low discounted total', () => {
+      const lineItems: LineItemInput[] = [
+        { id: '1', sku: 'PRODUCT-A', price: '100.00', quantity: 1 },
+      ];
+
+      // Order has 100 EUR item but -99 EUR discount → 1 EUR final
+      const result = distributeCustomsValues(lineItems, 1.0);
+
+      expect(result).toHaveLength(1);
+
+      const value = parseFloat(result[0].newCustomsValue);
+      expect(value).toBeLessThanOrEqual(1.0);
+      expect(value).toBeGreaterThanOrEqual(0.1); // Still respects minimum
+    });
+
+    it('should handle distribution with new min/max constraints', () => {
+      const lineItems: LineItemInput[] = [
+        { id: '1', sku: 'PRODUCT-A', price: '50.00', quantity: 1 },
+        { id: '2', sku: 'PRODUCT-B', price: '30.00', quantity: 1 },
+        { id: '3', sku: 'PRODUCT-C', price: '20.00', quantity: 1 },
+      ];
+
+      // Order has discount bringing total to 10 EUR
+      const result = distributeCustomsValues(lineItems, 10.0);
+
+      expect(result).toHaveLength(3);
+
+      const total = result.reduce((sum, item) => sum + parseFloat(item.newCustomsValue), 0);
+      expect(total).toBeLessThanOrEqual(10.01);
+
+      result.forEach((item) => {
+        const value = parseFloat(item.newCustomsValue);
+        expect(value).toBeGreaterThanOrEqual(0.1);
+        expect(value).toBeLessThanOrEqual(5.0);
+      });
+    });
+
+    it('should validate distribution for discounted orders', () => {
+      const lineItems: LineItemInput[] = [
+        { id: '1', sku: 'PRODUCT-A', price: '30.00', quantity: 1 },
+        { id: '2', sku: 'PRODUCT-B', price: '20.00', quantity: 1 },
+      ];
+
+      // Order total after discount: 10 EUR
+      const result = distributeCustomsValues(lineItems, 10.0);
+
+      const validation = validateDistribution(result, 10.0);
+      expect(validation.valid).toBe(true);
+      expect(validation.errors).toHaveLength(0);
+    });
+
+    it('should handle edge case with very low total and multiple items', () => {
+      const lineItems: LineItemInput[] = [
+        { id: '1', sku: 'PRODUCT-A', price: '50.00', quantity: 1 },
+        { id: '2', sku: 'PRODUCT-B', price: '30.00', quantity: 1 },
+        { id: '3', sku: 'PRODUCT-C', price: '20.00', quantity: 1 },
+      ];
+
+      // 3 items but only 0.5 EUR total after discount
+      // Min required: 0.30 (3 × 0.1), available: 0.5
+      const result = distributeCustomsValues(lineItems, 0.5);
+
+      expect(result).toHaveLength(3);
+
+      const total = result.reduce((sum, item) => sum + parseFloat(item.newCustomsValue), 0);
+      expect(total).toBeLessThanOrEqual(0.51);
+
+      // Each item should get close to minimum
+      result.forEach((item) => {
+        const value = parseFloat(item.newCustomsValue);
+        expect(value).toBeGreaterThanOrEqual(0.1);
+      });
     });
   });
 });

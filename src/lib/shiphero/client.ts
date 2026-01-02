@@ -1,6 +1,7 @@
 import { config } from '../config';
 import { createLogger } from '../logging/axiom';
 import { getShipHeroAuth } from './auth';
+import { getQuotaManager } from './quota';
 import {
   ShipHeroError,
   ShipHeroAuthError,
@@ -42,6 +43,7 @@ interface RequestOptions {
 export class ShipHeroClient {
   private auth = getShipHeroAuth();
   private requestCount = 0;
+  private quotaManager = getQuotaManager();
 
   /**
    * Execute a GraphQL query or mutation
@@ -100,6 +102,9 @@ export class ShipHeroClient {
     this.requestCount++;
     const requestId = `req_${this.requestCount}_${Date.now()}`;
 
+    // Track this request for quota management
+    this.quotaManager.trackRequest();
+
     // Get valid token
     const token = await this.auth.getValidToken();
 
@@ -108,6 +113,10 @@ export class ShipHeroClient {
       requestId,
       operationType: this._extractOperationType(query),
       variablesCount: variables ? Object.keys(variables).length : 0,
+      body: JSON.stringify({
+          query,
+          variables: variables || {},
+        })
     });
 
     let response: Response;
@@ -141,6 +150,32 @@ export class ShipHeroClient {
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
       const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
+
+      // Try to parse response body for more details
+      try {
+        const errorBody = await response.json();
+        const requiredCredits = errorBody.extensions?.cost?.requestedQueryCost;
+        const remainingCredits = errorBody.extensions?.cost?.remainingCredits;
+
+        // Update quota manager with server's actual remaining credits
+        if (remainingCredits !== undefined) {
+          this.quotaManager.updateFromResponse(0, remainingCredits);
+
+          logger.error('batch_error', 'Rate limit exceeded, quota updated from 429', {
+            requestId,
+            requiredCredits,
+            remainingCredits,
+            retryAfterMs,
+          });
+        }
+      } catch (parseError) {
+        // If we can't parse body, continue with basic error
+        logger.warn('batch_error', 'Could not parse 429 response body', {
+          requestId,
+          error: parseError,
+        });
+      }
+
       throw new ShipHeroQuotaError('Rate limit exceeded', undefined, retryAfterMs);
     }
 
@@ -181,6 +216,20 @@ export class ShipHeroClient {
       hasErrors: !!data.errors,
       hasData: !!data.data,
     });
+
+    // Update quota manager with response data
+    if (complexity !== undefined || credits) {
+      const creditsUsed = complexity || credits?.used || 0;
+      const creditsRemaining = credits?.remaining;
+
+      this.quotaManager.updateFromResponse(creditsUsed, creditsRemaining);
+
+      logger.debug('quota_warning', 'Quota updated from response', {
+        requestId,
+        complexity,
+        creditsRemaining,
+      });
+    }
 
     // Handle GraphQL errors
     if (data.errors && data.errors.length > 0) {

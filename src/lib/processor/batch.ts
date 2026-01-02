@@ -7,6 +7,7 @@ import { db } from '../db/client';
 import { batchRuns } from '../db/schema';
 import { getNow } from '../utils/timezone';
 import { eq } from 'drizzle-orm';
+import { getProcessingCursor, updateProcessingCursor, getLatestOrderDate } from '../db/cursor';
 
 const logger = createLogger({ service: 'batch-processor' });
 
@@ -43,11 +44,40 @@ export async function processBatch(): Promise<BatchResult> {
   // Reset quota manager for this batch
   quotaManager.reset();
 
+  // Get processing cursor (last processed date)
+  let processingStartDate: Date;
+  try {
+    processingStartDate = await getProcessingCursor();
+  } catch (error) {
+    logger.error('batch_error', 'Failed to get processing cursor, using env fallback', {
+      batchId,
+      error: error instanceof Error ? error.message : String(error),
+      fallback: config.business.startDate,
+    });
+    // Fallback to env if cursor fails
+    processingStartDate = new Date(config.business.startDate);
+  }
+
+  // Track all orders processed in this batch for cursor update
+  const processedOrders: Array<{ order_date: string }> = [];
+
+  // Log initial quota status with request limits
+  const quotaStatus = quotaManager.getStatus();
   logger.info('batch_started', 'Starting batch processing', {
     batchId,
     startedAt: startedAt.toISOString(),
     dryRun: config.features.dryRun,
     fulfillmentStatuses: getFulfillmentStatuses(),
+    quotaLimits: {
+      credits: {
+        max: quotaStatus.maxCredits,
+        replenishRate: quotaStatus.replenishRate,
+      },
+      requests: {
+        max: quotaStatus.maxRequestsPerWindow,
+        windowMinutes: 5,
+      },
+    },
   });
 
   const result: BatchResult = {
@@ -88,13 +118,14 @@ export async function processBatch(): Promise<BatchResult> {
       logger.info('batch_started', `Processing orders with status: ${status}`, {
         batchId,
         fulfillmentStatus: status,
+        startDate: processingStartDate.toISOString(),
       });
 
-      // Fetch orders with pagination
+      // Fetch orders with pagination, starting from cursor date
       const orderGenerator = fetchAllOrders({
         customerAccountId: config.shiphero.customerId,
         fulfillmentStatus: status,
-        orderDateFrom: config.business.startDate,
+        orderDateFrom: processingStartDate.toISOString(),
         first: 25,
       });
 
@@ -148,6 +179,11 @@ export async function processBatch(): Promise<BatchResult> {
           // Update quota
           quotaManager.updateFromResponse(orderResult.creditsUsed);
 
+          // Track order for cursor update (only if processed successfully and has order_date)
+          if (orderResult.status === 'processed' && order.order_date) {
+            processedOrders.push({ order_date: order.order_date });
+          }
+
           // Update result counters
           if (orderResult.status === 'processed') {
             result.ordersProcessed++;
@@ -171,12 +207,47 @@ export async function processBatch(): Promise<BatchResult> {
     result.status = 'completed';
     result.completedAt = getNow();
 
+    // Update processing cursor with latest order date
+    if (processedOrders.length > 0) {
+      try {
+        const latestOrderDate = getLatestOrderDate(processedOrders);
+        await updateProcessingCursor(latestOrderDate, batchId);
+
+        logger.info('cursor_updated', 'Processing cursor advanced', {
+          batchId,
+          ordersProcessed: processedOrders.length,
+          newCursorDate: latestOrderDate.toISOString(),
+        });
+      } catch (error) {
+        logger.error('cursor_error', 'Failed to update cursor after batch', {
+          batchId,
+          error: error instanceof Error ? error.message : String(error),
+          note: 'Next batch will reprocess from old cursor',
+        });
+        // Don't fail the batch if cursor update fails
+        // Next run will reprocess from old cursor (safe)
+      }
+    } else {
+      logger.info('cursor_unchanged', 'No orders processed, cursor not updated', {
+        batchId,
+      });
+    }
+
+    // Get final quota status
+    const finalQuotaStatus = quotaManager.getStatus();
+
     logger.info('batch_completed', 'Batch processing completed', {
       // batchId,
       ...result,
       duration: result.completedAt
         ? result.completedAt.getTime() - result.startedAt.getTime()
         : 0,
+      quotaUsage: {
+        creditsUsed: finalQuotaStatus.totalUsed,
+        creditsRemaining: finalQuotaStatus.remaining,
+        requestsMade: finalQuotaStatus.requestsInWindow,
+        requestsRemaining: finalQuotaStatus.requestLimitRemaining,
+      },
     });
   } catch (error) {
     result.status = 'failed';

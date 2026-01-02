@@ -7,6 +7,11 @@ const MAX_CREDITS = 4004;
 const REPLENISH_RATE = 60; // credits per second
 const MIN_CREDITS_BUFFER = 100; // Keep a buffer to avoid hitting limits
 
+// Request count limit constants (ShipHero hard limit)
+const MAX_REQUESTS_PER_WINDOW = 7000; // Max requests per 5-minute window
+const REQUEST_WINDOW_MS = 5 * 60 * 1000; // 5 minutes in milliseconds
+const MIN_REQUESTS_BUFFER = 100; // Safety buffer for request limit
+
 /**
  * Quota manager for ShipHero API
  * Tracks credit usage and provides throttling logic
@@ -15,6 +20,7 @@ export class QuotaManager {
   private remainingCredits: number = MAX_CREDITS;
   private lastUpdateTime: number = Date.now();
   private totalCreditsUsed: number = 0;
+  private requestTimestamps: number[] = []; // Track request times in rolling window
 
   constructor() {
     logger.info('batch_started', 'Quota manager initialized', {
@@ -22,6 +28,78 @@ export class QuotaManager {
       replenishRate: REPLENISH_RATE,
       minBuffer: MIN_CREDITS_BUFFER,
     });
+  }
+
+  /**
+   * Track a new request and clean up old timestamps
+   * Called before making any API request
+   */
+  trackRequest(): void {
+    const now = Date.now();
+
+    // Remove timestamps older than 5 minutes
+    const windowStart = now - REQUEST_WINDOW_MS;
+    this.requestTimestamps = this.requestTimestamps.filter(
+      (timestamp) => timestamp > windowStart
+    );
+
+    // Add current request
+    this.requestTimestamps.push(now);
+
+    logger.debug('quota_warning', 'Request tracked', {
+      requestsInWindow: this.requestTimestamps.length,
+      windowStart: new Date(windowStart).toISOString(),
+      remaining: MAX_REQUESTS_PER_WINDOW - this.requestTimestamps.length,
+    });
+  }
+
+  /**
+   * Get number of requests in the current 5-minute window
+   */
+  private getRequestsInWindow(): number {
+    const now = Date.now();
+    const windowStart = now - REQUEST_WINDOW_MS;
+
+    // Filter to only include requests within window
+    return this.requestTimestamps.filter(
+      (timestamp) => timestamp > windowStart
+    ).length;
+  }
+
+  /**
+   * Check if we can make another request without hitting request limit
+   * Returns { ok: true } if we can proceed
+   * Returns { ok: false, waitMs: number } if we need to wait
+   */
+  canMakeRequest(): { ok: boolean; waitMs?: number; reason?: string } {
+    const requestsInWindow = this.getRequestsInWindow();
+    const availableRequests = MAX_REQUESTS_PER_WINDOW - requestsInWindow;
+
+    // Check if we have buffer space
+    if (availableRequests > MIN_REQUESTS_BUFFER) {
+      return { ok: true };
+    }
+
+    // If at or over limit, calculate when oldest request expires
+    if (this.requestTimestamps.length > 0) {
+      const oldestRequest = this.requestTimestamps[0];
+      const waitMs = Math.max(0, (oldestRequest + REQUEST_WINDOW_MS) - Date.now());
+
+      logger.warn('quota_warning', 'Request limit reached, need to wait', {
+        requestsInWindow,
+        maxRequests: MAX_REQUESTS_PER_WINDOW,
+        waitMs,
+        oldestRequestAge: Date.now() - oldestRequest,
+      });
+
+      return {
+        ok: false,
+        waitMs,
+        reason: 'request_limit',
+      };
+    }
+
+    return { ok: true };
   }
 
   /**
@@ -73,7 +151,14 @@ export class QuotaManager {
    * Returns { ok: true } if we can proceed
    * Returns { ok: false, waitMs: number } if we need to wait
    */
-  canProceed(estimatedCost: number): { ok: boolean; waitMs?: number } {
+  canProceed(estimatedCost: number): { ok: boolean; waitMs?: number; reason?: string } {
+    // 1. Check request count limit first (fast check)
+    const requestCheck = this.canMakeRequest();
+    if (!requestCheck.ok) {
+      return requestCheck;
+    }
+
+    // 2. Check credit limit (existing logic)
     // Replenish credits based on time passed
     const now = Date.now();
     const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
@@ -106,6 +191,7 @@ export class QuotaManager {
     return {
       ok: false,
       waitMs,
+      reason: 'insufficient_credits',
     };
   }
 
@@ -148,6 +234,9 @@ export class QuotaManager {
     totalUsed: number;
     replenishRate: number;
     maxCredits: number;
+    requestsInWindow: number;
+    maxRequestsPerWindow: number;
+    requestLimitRemaining: number;
   } {
     // Replenish based on time passed
     const now = Date.now();
@@ -155,11 +244,16 @@ export class QuotaManager {
     const replenished = Math.floor(timeSinceLastUpdate * REPLENISH_RATE);
     const remaining = Math.min(MAX_CREDITS, this.remainingCredits + replenished);
 
+    const requestsInWindow = this.getRequestsInWindow();
+
     return {
       remaining,
       totalUsed: this.totalCreditsUsed,
       replenishRate: REPLENISH_RATE,
       maxCredits: MAX_CREDITS,
+      requestsInWindow,
+      maxRequestsPerWindow: MAX_REQUESTS_PER_WINDOW,
+      requestLimitRemaining: MAX_REQUESTS_PER_WINDOW - requestsInWindow,
     };
   }
 
@@ -177,9 +271,11 @@ export class QuotaManager {
     this.remainingCredits = MAX_CREDITS;
     this.lastUpdateTime = Date.now();
     this.totalCreditsUsed = 0;
+    this.requestTimestamps = [];
 
     logger.info('batch_started', 'Quota manager reset', {
       maxCredits: MAX_CREDITS,
+      maxRequestsPerWindow: MAX_REQUESTS_PER_WINDOW,
     });
   }
 

@@ -1,7 +1,7 @@
 import { getShipHeroClient } from './client';
 import type { UpdateLineItemsResponse, AddTagsResponse, LineItemUpdate } from './types';
 import { createLogger } from '../logging/axiom';
-import { ShipHeroError } from './errors';
+import { ShipHeroError, ShipHeroGraphQLError } from './errors';
 
 const logger = createLogger({ service: 'shiphero-mutations' });
 
@@ -9,10 +9,10 @@ const logger = createLogger({ service: 'shiphero-mutations' });
  * GraphQL mutation to update line items
  */
 const UPDATE_LINE_ITEMS_MUTATION = `
-  mutation UpdateLineItems($orderId: String!, $lineItems: [LineItemUpdateInput!]!) {
+  mutation UpdateLineItems($orderId: String!, $lineItems: [UpdateLineItemInput!]!) {
     order_update_line_items(
       data: {
-        order_id: $orderId
+        order_id: $orderId,
         line_items: $lineItems
       }
     ) {
@@ -30,10 +30,6 @@ const UPDATE_LINE_ITEMS_MUTATION = `
             }
           }
         }
-      }
-      user_errors {
-        message
-        path
       }
     }
   }
@@ -56,10 +52,6 @@ const ADD_TAGS_MUTATION = `
         id
         order_number
         tags
-      }
-      user_errors {
-        message
-        path
       }
     }
   }
@@ -85,7 +77,7 @@ export async function updateLineItemsCustomsValue(
   try {
     // Transform to ShipHero's expected format
     const lineItemUpdates: LineItemUpdate[] = lineItems.map((item) => ({
-      line_item_id: item.id,
+      id: item.id,
       customs_value: item.customs_value,
     }));
 
@@ -98,8 +90,8 @@ export async function updateLineItemsCustomsValue(
     );
 
     // Check for user errors
-    if (response.data?.order_update_line_items?.user_errors?.length) {
-      const errors = response.data.order_update_line_items.user_errors;
+    if (response.data?.errors?.length) {
+      const errors = response.data.errors;
       const errorMessages = errors.map((e) => e.message).join(', ');
 
       logger.error('batch_error', 'Line items update failed with user errors', {
@@ -111,7 +103,7 @@ export async function updateLineItemsCustomsValue(
 
       throw new ShipHeroError(
         `Failed to update line items: ${errorMessages}`,
-        'USER_ERROR',
+        'ERROR',
         undefined,
         errors
       );
@@ -132,12 +124,30 @@ export async function updateLineItemsCustomsValue(
       complexity,
     };
   } catch (error) {
-    logger.error('batch_error', 'Failed to update line items', {
+    // Enhanced logging to capture full error details
+    const errorDetails: Record<string, unknown> = {
       orderId,
       orderNumber: context?.orderNumber,
       batchId: context?.batchId,
       error: error instanceof Error ? error.message : String(error),
-    });
+    };
+
+    // If it's a ShipHeroError, log the details field (contains response body)
+    if (error instanceof ShipHeroError && error.details) {
+      errorDetails.responseBody = error.details;
+    }
+
+    // If it's a GraphQL error, log the graphqlErrors
+    if (error instanceof ShipHeroGraphQLError && error.graphqlErrors) {
+      errorDetails.graphqlErrors = error.graphqlErrors;
+    }
+
+    // Log stack trace for debugging
+    if (error instanceof Error && error.stack) {
+      errorDetails.stack = error.stack;
+    }
+
+    logger.error('batch_error', 'Failed to update line items', errorDetails);
     throw error;
   }
 }
@@ -169,25 +179,25 @@ export async function addOrderTag(
     );
 
     // Check for user errors
-    if (response.data?.order_add_tags?.user_errors?.length) {
-      const errors = response.data.order_add_tags.user_errors;
-      const errorMessages = errors.map((e) => e.message).join(', ');
+    // if (response.data?.order_add_tags?.user_errors?.length) {
+    //   const errors = response.data.order_add_tags.user_errors;
+    //   const errorMessages = errors.map((e) => e.message).join(', ');
 
-      logger.error('batch_error', 'Add tag failed with user errors', {
-        orderId,
-        orderNumber: context?.orderNumber,
-        batchId: context?.batchId,
-        tag,
-        errors: errorMessages,
-      });
+    //   logger.error('batch_error', 'Add tag failed with user errors', {
+    //     orderId,
+    //     orderNumber: context?.orderNumber,
+    //     batchId: context?.batchId,
+    //     tag,
+    //     errors: errorMessages,
+    //   });
 
-      throw new ShipHeroError(
-        `Failed to add tag: ${errorMessages}`,
-        'USER_ERROR',
-        undefined,
-        errors
-      );
-    }
+    //   throw new ShipHeroError(
+    //     `Failed to add tag: ${errorMessages}`,
+    //     'USER_ERROR',
+    //     undefined,
+    //     errors
+    //   );
+    // }
 
     const complexity = response.data?.order_add_tags?.complexity || 0;
 
@@ -242,25 +252,25 @@ export async function addOrderTags(
     );
 
     // Check for user errors
-    if (response.data?.order_add_tags?.user_errors?.length) {
-      const errors = response.data.order_add_tags.user_errors;
-      const errorMessages = errors.map((e) => e.message).join(', ');
+    // if (response.data?.order_add_tags?.user_errors?.length) {
+    //   const errors = response.data.order_add_tags.user_errors;
+    //   const errorMessages = errors.map((e) => e.message).join(', ');
 
-      logger.error('batch_error', 'Add tags failed with user errors', {
-        orderId,
-        orderNumber: context?.orderNumber,
-        batchId: context?.batchId,
-        tags,
-        errors: errorMessages,
-      });
+    //   logger.error('batch_error', 'Add tags failed with user errors', {
+    //     orderId,
+    //     orderNumber: context?.orderNumber,
+    //     batchId: context?.batchId,
+    //     tags,
+    //     errors: errorMessages,
+    //   });
 
-      throw new ShipHeroError(
-        `Failed to add tags: ${errorMessages}`,
-        'USER_ERROR',
-        undefined,
-        errors
-      );
-    }
+    //   throw new ShipHeroError(
+    //     `Failed to add tags: ${errorMessages}`,
+    //     'USER_ERROR',
+    //     undefined,
+    //     errors
+    //   );
+    // }
 
     const complexity = response.data?.order_add_tags?.complexity || 0;
 

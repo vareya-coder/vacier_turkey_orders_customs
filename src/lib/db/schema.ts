@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, timestamp, integer, jsonb, index } from 'drizzle-orm/pg-core';
 
 export const batchRuns = pgTable('batch_runs', {
   id: serial('id').primaryKey(),
@@ -16,3 +16,22 @@ export const batchRuns = pgTable('batch_runs', {
 
 export type BatchRun = typeof batchRuns.$inferSelect;
 export type NewBatchRun = typeof batchRuns.$inferInsert;
+
+export const processingCursor = pgTable(
+  'processing_cursor',
+  {
+    id: serial('id').primaryKey(),
+    cursorName: varchar('cursor_name', { length: 50 }).notNull().unique(),
+    lastProcessedDate: timestamp('last_processed_date', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedByBatchId: varchar('updated_by_batch_id', { length: 50 }),
+  },
+  (table) => {
+    return {
+      cursorNameIdx: index('processing_cursor_name_idx').on(table.cursorName),
+    };
+  }
+);
+
+export type ProcessingCursor = typeof processingCursor.$inferSelect;
+export type NewProcessingCursor = typeof processingCursor.$inferInsert;

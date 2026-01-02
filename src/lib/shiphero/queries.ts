@@ -15,15 +15,13 @@ export const GET_VACIER_ORDERS = `
     $first: Int
   ) {
     orders(
-      first: $first
-      after: $cursor
       customer_account_id: $customerId
       fulfillment_status: $status
       order_date_from: $startDate
     ) {
       request_id
       complexity
-      data {
+      data(after: $cursor, first: $first) {
         pageInfo {
           hasNextPage
           hasPreviousPage
@@ -40,6 +38,7 @@ export const GET_VACIER_ORDERS = `
             order_date
             total_price
             subtotal
+            total_discounts
             email
             tags
             shipping_address {

@@ -25,7 +25,32 @@ export type SkipReason =
   | 'not_turkey'
   | 'already_tagged'
   | 'no_billable_items'
-  | 'missing_address';
+  | 'missing_address'
+  | 'zero_or_negative_total';
+
+/**
+ * Calculate effective maximum customs value based on order total
+ * Handles discounted orders and zero/negative totals
+ */
+function calculateEffectiveMaxTotal(
+  order: Order,
+  defaultMaxTotal: number
+): number | null {
+  const orderTotal = parseFloat(order.total_price || '0');
+
+  // Case 1: Zero or negative order total → Skip customs entirely
+  if (orderTotal <= 0) {
+    return null; // Signal to skip customs
+  }
+
+  // Case 2: Order total below default max → Use order total as cap
+  if (orderTotal < defaultMaxTotal) {
+    return orderTotal;
+  }
+
+  // Case 3: Order total >= default max → Use default max (25 EUR)
+  return defaultMaxTotal;
+}
 
 /**
  * Process a single order for customs value update
@@ -117,6 +142,47 @@ export async function processOrder(
       };
     }
 
+    // Calculate effective max customs value based on order total
+    const effectiveMaxTotal = calculateEffectiveMaxTotal(
+      order,
+      config.business.maxCustomsValue
+    );
+
+    // Handle zero/negative order total → Skip customs distribution
+    if (effectiveMaxTotal === null) {
+      logger.info('order_skipped', 'Order total is zero or negative, skipping customs', {
+        batchId,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        orderTotal: order.total_price,
+        subtotal: order.subtotal,
+        totalDiscounts: order.total_discounts,
+      });
+
+      return {
+        orderId: order.id,
+        orderNumber: order.order_number,
+        status: 'skipped',
+        reason: 'zero_or_negative_total',
+        creditsUsed: 0,
+      };
+    }
+
+    // Log discount/adjustment information if applicable
+    const orderTotal = parseFloat(order.total_price || '0');
+    if (effectiveMaxTotal < config.business.maxCustomsValue) {
+      logger.info('customs_adjusted', 'Order total below standard max, using discounted cap', {
+        batchId,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        orderTotal: orderTotal.toFixed(2),
+        subtotal: order.subtotal,
+        totalDiscounts: order.total_discounts,
+        standardMax: config.business.maxCustomsValue,
+        effectiveMax: effectiveMaxTotal.toFixed(2),
+      });
+    }
+
     // Get billable line items
     const billableItems = getBillableLineItems(order);
 
@@ -125,6 +191,8 @@ export async function processOrder(
       orderId: order.id,
       orderNumber: order.order_number,
       itemCount: billableItems.length,
+      orderTotal: orderTotal.toFixed(2),
+      effectiveMaxTotal: effectiveMaxTotal.toFixed(2),
     });
 
     // Calculate customs distribution
@@ -135,12 +203,28 @@ export async function processOrder(
         price: item.price || '0',
         quantity: item.quantity,
       })),
-      config.business.maxCustomsValue
+      effectiveMaxTotal
     );
 
     const total = distribution
       .filter((d) => !d.isComplimentary)
       .reduce((sum, d) => sum + parseFloat(d.newCustomsValue), 0);
+
+    // Validate that distributed customs doesn't exceed order total
+    if (total > orderTotal + 0.01) {
+      logger.error('batch_error', 'Distributed customs exceeds order total!', {
+        batchId,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        orderTotal: orderTotal.toFixed(2),
+        distributedTotal: total.toFixed(2),
+        difference: (total - orderTotal).toFixed(2),
+      });
+
+      throw new Error(
+        `Customs distribution (${total.toFixed(2)}) exceeds order total (${orderTotal.toFixed(2)})`
+      );
+    }
 
     logger.info('customs_calculated', `Customs values calculated (total: €${total.toFixed(2)})`, {
       batchId,

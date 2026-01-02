@@ -16,8 +16,8 @@ export interface CustomsDistribution {
 }
 
 // Constants for distribution algorithm
-const MIN_ITEM_VALUE = 0.5; // Minimum customs value per billable item (EUR)
-const MAX_ITEM_VALUE = 8.0; // Maximum customs value per item (EUR)
+const MIN_ITEM_VALUE = 0.1; // Minimum customs value per billable item (EUR)
+const MAX_ITEM_VALUE = 5.0; // Maximum customs value per item (EUR)
 const DEFAULT_MAX_TOTAL = 25.0; // Maximum total customs value (EUR)
 
 /**
@@ -70,6 +70,18 @@ export function distributeCustomsValues(
     }));
   }
 
+  // Edge case: If maxTotal is too low to distribute minimum values
+  const minRequiredTotal = billableItems.length * MIN_ITEM_VALUE;
+  if (maxTotal < minRequiredTotal) {
+    logger.warn('customs_calculated', 'Max total insufficient for minimum per-item values', {
+      maxTotal,
+      billableItems: billableItems.length,
+      minRequired: minRequiredTotal.toFixed(2),
+    });
+
+    // Still attempt distribution - algorithm will scale down as needed
+  }
+
   // Generate distribution for billable items
   const billableDistribution = distributeBillableItems(billableItems, maxTotal);
 
@@ -95,6 +107,8 @@ export function distributeCustomsValues(
     totalCustomsValue: total.toFixed(2),
     maxTotal,
     withinLimit: total <= maxTotal,
+    utilizationPercent: ((total / maxTotal) * 100).toFixed(1),
+    isDiscountedOrder: maxTotal < DEFAULT_MAX_TOTAL,
   });
 
   if (total > maxTotal) {
