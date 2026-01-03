@@ -6,9 +6,21 @@ export const TIMEZONE = env.TZ; // 'Europe/Amsterdam'
 
 /**
  * Get current date/time in the configured timezone
+ * Falls back to UTC if timezone conversion fails (critical for Vercel serverless environment)
  */
 export function getNow(): Date {
-  return toZonedTime(new Date(), TIMEZONE);
+  try {
+    const zonedDate = toZonedTime(new Date(), TIMEZONE);
+    // Validate the date is not invalid
+    if (isNaN(zonedDate.getTime())) {
+      console.error('toZonedTime returned invalid date, falling back to UTC');
+      return new Date();
+    }
+    return zonedDate;
+  } catch (error) {
+    console.error('Error in getNow, falling back to UTC:', error);
+    return new Date();
+  }
 }
 
 /**

@@ -5,9 +5,14 @@ import { createLogger } from '@/lib/logging/axiom';
 
 const logger = createLogger({ service: 'cron-handler' });
 
+// Vercel serverless function configuration
+// Set to 5 minutes for Pro plan (max 300s)
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
+
 /**
  * Cron handler for customs value updates
- * Called by Vercel Cron every 5 minutes
+ * Called by Vercel Cron every 10 minutes
  *
  * GET /api/cron/customs-update
  */
