@@ -66,8 +66,8 @@ export async function processBatch(): Promise<BatchResult> {
     processingStartDate = new Date(config.business.startDate);
   }
 
-  // Track all orders processed in this batch for cursor update
-  const processedOrders: Array<{ order_date: string }> = [];
+  // Track all orders for cursor update (processed and skipped, but NOT errors)
+  const cursorOrders: Array<{ order_date: string }> = [];
 
   // Log initial quota status with request limits
   const quotaStatus = quotaManager.getStatus();
@@ -187,9 +187,10 @@ export async function processBatch(): Promise<BatchResult> {
           // Update quota
           quotaManager.updateFromResponse(orderResult.creditsUsed);
 
-          // Track order for cursor update (only if processed successfully and has order_date)
-          if (orderResult.status === 'processed' && order.order_date) {
-            processedOrders.push({ order_date: order.order_date });
+          // Track order for cursor update (processed and skipped, but NOT errors)
+          // Errors will be retried in subsequent batches
+          if ((orderResult.status === 'processed' || orderResult.status === 'skipped') && order.order_date) {
+            cursorOrders.push({ order_date: order.order_date });
           }
 
           // Update result counters
@@ -216,14 +217,16 @@ export async function processBatch(): Promise<BatchResult> {
     result.completedAt = getNow();
 
     // Update processing cursor with latest order date
-    if (processedOrders.length > 0) {
+    if (cursorOrders.length > 0) {
       try {
-        const latestOrderDate = getLatestOrderDate(processedOrders);
+        const latestOrderDate = getLatestOrderDate(cursorOrders);
         await updateProcessingCursor(latestOrderDate, batchId);
 
         logger.info('cursor_updated', 'Processing cursor advanced', {
           batchId,
-          ordersProcessed: processedOrders.length,
+          ordersForCursor: cursorOrders.length, // Includes both processed and skipped
+          ordersProcessed: result.ordersProcessed, // Actual processed count
+          ordersSkipped: result.ordersSkipped,
           newCursorDate: latestOrderDate.toISOString(),
         });
       } catch (error) {
@@ -236,8 +239,11 @@ export async function processBatch(): Promise<BatchResult> {
         // Next run will reprocess from old cursor (safe)
       }
     } else {
-      logger.info('cursor_unchanged', 'No orders processed, cursor not updated', {
+      logger.info('cursor_unchanged', 'No processed or skipped orders, cursor not updated', {
         batchId,
+        ordersQueried: result.ordersQueried,
+        errorsCount: result.errorsCount,
+        note: 'Cursor not updated because all orders had errors (will retry next batch)',
       });
     }
 
