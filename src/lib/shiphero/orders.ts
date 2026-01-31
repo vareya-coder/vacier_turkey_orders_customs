@@ -23,6 +23,7 @@ export async function* fetchAllOrders(
       customerAccountId: filters.customerAccountId,
       fulfillmentStatus: filters.fulfillmentStatus,
       orderDateFrom: filters.orderDateFrom,
+      orderDateTo: filters.orderDateTo,
       pageSize,
     },
   });
@@ -38,6 +39,7 @@ export async function* fetchAllOrders(
           cursor,
           status: filters.fulfillmentStatus,
           startDate: filters.orderDateFrom,
+          endDate: filters.orderDateTo,
           customerId: filters.customerAccountId,
           first: pageSize,
         }

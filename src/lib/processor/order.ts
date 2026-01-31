@@ -68,6 +68,16 @@ export async function processOrder(
     dryRun,
   });
 
+  // Log order number for backfill tracking
+  if (config.features.enableManualBackfill) {
+    logger.warn('batch_started', '🔄 BACKFILL: Processing order', {
+      orderNumber: order.order_number,
+      orderDate: order.order_date,
+      mode: 'BACKFILL',
+      orderId: order.id,
+    });
+  }
+
   let creditsUsed = 0;
 
   try {

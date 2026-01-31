@@ -113,10 +113,6 @@ export class ShipHeroClient {
       requestId,
       operationType: this._extractOperationType(query),
       variablesCount: variables ? Object.keys(variables).length : 0,
-      body: JSON.stringify({
-          query,
-          variables: variables || {},
-        })
     });
 
     let response: Response;

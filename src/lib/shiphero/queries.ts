@@ -11,6 +11,7 @@ export const GET_VACIER_ORDERS = `
     $cursor: String
     $status: String!
     $startDate: ISODateTime!
+    $endDate: ISODateTime
     $customerId: String!
     $first: Int
   ) {
@@ -18,6 +19,7 @@ export const GET_VACIER_ORDERS = `
       customer_account_id: $customerId
       fulfillment_status: $status
       order_date_from: $startDate
+      order_date_to: $endDate
     ) {
       request_id
       complexity

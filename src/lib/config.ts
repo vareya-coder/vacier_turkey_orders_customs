@@ -66,6 +66,14 @@ export const config = {
      * If true, all actions are logged but no mutations are made
      */
     dryRun: env.FEATURE_DRY_RUN,
+
+    /**
+     * Manual backfill mode
+     * If true, processes orders within a specific date range instead of last 24h
+     */
+    enableManualBackfill: env.FEATURE_MANUAL_BACKFILL,
+    backfillStartDate: env.BACKFILL_START_DATE,
+    backfillEndDate: env.BACKFILL_END_DATE,
   },
 
   /**

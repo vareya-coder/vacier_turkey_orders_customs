@@ -120,6 +120,7 @@ export interface OrderFilters {
   customerAccountId: string;
   fulfillmentStatus: string;
   orderDateFrom: string;
+  orderDateTo?: string;  // Optional end date for backfill mode
   cursor?: string;
   first?: number;
 }

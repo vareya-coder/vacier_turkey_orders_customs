@@ -7,6 +7,12 @@ const envSchema = z.object({
   SHIPHERO_ACCESS_TOKEN: z.string().min(1, 'ShipHero access token is required'),
   SHIPHERO_REFRESH_TOKEN: z.string().min(1, 'ShipHero refresh token is required'),
 
+  // Upstash Redis (optional - for token persistence across cron runs)
+  // Auto-added by Vercel when connecting Upstash Redis native integration
+  // Note: UPSTASH_REDIS_REST_READ_ONLY_TOKEN is also added but not needed for our use case
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+
   // Business Configuration
   VACIER_CUSTOMER_ACCOUNT_ID: z.string().min(1, 'Vacier customer account ID is required'),
   TARGET_COUNTRY: z.string().length(2).default('TR'),
@@ -35,6 +41,11 @@ const envSchema = z.object({
   FEATURE_ERROR_NOTIFICATIONS: z.string().transform((val) => val === 'true').default(true),
   FEATURE_SUCCESS_NOTIFICATIONS: z.string().transform((val) => val === 'true').default(false),
   FEATURE_DRY_RUN: z.string().transform((val) => val === 'true').default(false),
+
+  // Manual backfill mode for processing missed orders
+  FEATURE_MANUAL_BACKFILL: z.string().default('false').transform((val) => val === 'true'),
+  BACKFILL_START_DATE: z.string().optional(),
+  BACKFILL_END_DATE: z.string().optional(),
 
   // Vercel
   CRON_SECRET: z.string().optional(),

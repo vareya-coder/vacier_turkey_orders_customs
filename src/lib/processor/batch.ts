@@ -118,6 +118,33 @@ export async function processBatch(): Promise<BatchResult> {
       dryRun: config.features.dryRun,
     };
 
+    // Determine date range based on backfill mode
+    let since: string;
+    let until: string | undefined;
+
+    if (config.features.enableManualBackfill && config.features.backfillStartDate && config.features.backfillEndDate) {
+      // BACKFILL MODE: Use hardcoded date range
+      since = config.features.backfillStartDate;
+      until = config.features.backfillEndDate;
+
+      logger.warn('batch_started', '🔄 MANUAL BACKFILL MODE ACTIVE', {
+        batchId,
+        backfillStartDate: since,
+        backfillEndDate: until,
+        mode: 'BACKFILL',
+      });
+    } else {
+      // NORMAL MODE: Use cursor date (or last 24 hours if cursor fails)
+      since = processingStartDate.toISOString();
+      until = undefined;
+
+      logger.info('batch_started', 'Normal processing mode', {
+        batchId,
+        since,
+        mode: 'NORMAL',
+      });
+    }
+
     // Get fulfillment statuses to query
     const statuses = getFulfillmentStatuses();
 
@@ -126,14 +153,16 @@ export async function processBatch(): Promise<BatchResult> {
       logger.info('batch_started', `Processing orders with status: ${status}`, {
         batchId,
         fulfillmentStatus: status,
-        startDate: processingStartDate.toISOString(),
+        startDate: since,
+        endDate: until,
       });
 
       // Fetch orders with pagination, starting from cursor date
       const orderGenerator = fetchAllOrders({
         customerAccountId: config.shiphero.customerId,
         fulfillmentStatus: status,
-        orderDateFrom: processingStartDate.toISOString(),
+        orderDateFrom: since,
+        orderDateTo: until,
         first: 25,
       });
 
