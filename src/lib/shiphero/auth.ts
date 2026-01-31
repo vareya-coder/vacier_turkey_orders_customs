@@ -1,7 +1,7 @@
 import { env } from '../env';
 import { config } from '../config';
 import { ShipHeroAuthError, ShipHeroNetworkError } from './errors';
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
 import { createLogger } from '../logging/axiom';
 
 const logger = createLogger({ service: 'shiphero-auth' });
@@ -9,8 +9,25 @@ const logger = createLogger({ service: 'shiphero-auth' });
 const KV_ACCESS_TOKEN_KEY = 'shiphero:access_token';
 const KV_EXPIRES_AT_KEY = 'shiphero:expires_at';
 
-// Check if KV is configured
-function isKVConfigured(): boolean {
+// Initialize Redis client if configured
+let redis: Redis | null = null;
+function getRedisClient(): Redis | null {
+  if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
+    return null;
+  }
+
+  if (!redis) {
+    redis = new Redis({
+      url: env.UPSTASH_REDIS_REST_URL,
+      token: env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  }
+
+  return redis;
+}
+
+// Check if Redis is configured
+function isRedisConfigured(): boolean {
   return !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN);
 }
 
@@ -45,12 +62,13 @@ export class ShipHeroAuth {
    * Get a valid access token (refresh if necessary)
    */
   async getValidToken(): Promise<string> {
-    // Try to get token from KV first (if configured)
-    if (isKVConfigured()) {
+    // Try to get token from Redis first (if configured)
+    const redisClient = getRedisClient();
+    if (redisClient) {
       try {
         const [cachedToken, expiresAt] = await Promise.all([
-          kv.get<string>(KV_ACCESS_TOKEN_KEY),
-          kv.get<number>(KV_EXPIRES_AT_KEY),
+          redisClient.get<string>(KV_ACCESS_TOKEN_KEY),
+          redisClient.get<number>(KV_EXPIRES_AT_KEY),
         ]);
 
         if (cachedToken && expiresAt) {
@@ -59,7 +77,7 @@ export class ShipHeroAuth {
 
           // Check if token is still valid (with 5-min buffer)
           if (now < expiresAt - fiveMinutes) {
-            logger.debug('order_processing', 'Using cached token from KV', {
+            logger.debug('order_processing', 'Using cached token from Redis', {
               expiresAt: new Date(expiresAt).toISOString(),
               remainingMs: expiresAt - now,
             });
@@ -67,7 +85,7 @@ export class ShipHeroAuth {
           }
         }
       } catch (error) {
-        logger.warn('batch_error', 'Failed to read from KV, falling back to refresh', {
+        logger.warn('batch_error', 'Failed to read from Redis, falling back to refresh', {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -175,7 +193,7 @@ export class ShipHeroAuth {
         );
       }
 
-      // Update in-memory token (fallback for when KV unavailable)
+      // Update in-memory token (fallback for when Redis unavailable)
       this.accessToken = data.access_token;
 
       // Calculate actual expiry time from expires_in
@@ -183,30 +201,31 @@ export class ShipHeroAuth {
       const expiresAt = Date.now() + expiresInMs;
       this.tokenExpiryTime = expiresAt;
 
-      // Persist to KV if configured
-      if (isKVConfigured()) {
+      // Persist to Redis if configured
+      const redisClient = getRedisClient();
+      if (redisClient) {
         try {
           await Promise.all([
-            kv.set(KV_ACCESS_TOKEN_KEY, data.access_token, {
+            redisClient.set(KV_ACCESS_TOKEN_KEY, data.access_token, {
               ex: data.expires_in, // TTL in seconds
             }),
-            kv.set(KV_EXPIRES_AT_KEY, expiresAt, {
+            redisClient.set(KV_EXPIRES_AT_KEY, expiresAt, {
               ex: data.expires_in,
             }),
           ]);
 
-          logger.info('batch_completed', 'Token refreshed and cached in KV', {
+          logger.info('batch_completed', 'Token refreshed and cached in Redis', {
             expiresAt: new Date(expiresAt).toISOString(),
             expiresInSeconds: data.expires_in,
             expiresInDays: Math.floor(data.expires_in / 86400),
           });
         } catch (error) {
-          logger.warn('batch_error', 'Failed to cache token in KV, continuing with in-memory', {
+          logger.warn('batch_error', 'Failed to cache token in Redis, continuing with in-memory', {
             error: error instanceof Error ? error.message : String(error),
           });
         }
       } else {
-        logger.info('batch_completed', 'Token refreshed (KV not configured, using in-memory only)', {
+        logger.info('batch_completed', 'Token refreshed (Redis not configured, using in-memory only)', {
           expiresAt: new Date(expiresAt).toISOString(),
           expiresInDays: Math.floor(data.expires_in / 86400),
         });

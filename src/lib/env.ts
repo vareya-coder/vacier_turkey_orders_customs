@@ -8,8 +8,9 @@ const envSchema = z.object({
   SHIPHERO_REFRESH_TOKEN: z.string().min(1, 'ShipHero refresh token is required'),
 
   // Upstash Redis (optional - for token persistence across cron runs)
-  // Auto-added by Vercel when connecting Upstash Redis native integration
-  // Note: UPSTASH_REDIS_REST_READ_ONLY_TOKEN is also added but not needed for our use case
+  // Auto-added by Vercel when connecting Upstash Redis native integration via marketplace
+  // Required for production to avoid token refresh on every cron run
+  // Note: UPSTASH_REDIS_REST_READ_ONLY_TOKEN is also added by Vercel but not needed
   UPSTASH_REDIS_REST_URL: z.string().url().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 

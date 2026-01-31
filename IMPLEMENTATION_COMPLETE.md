@@ -1,7 +1,30 @@
 # ShipHero Token Refresh & Backfill Implementation - COMPLETE ✅
 
 **Implementation Date**: 2026-01-31
+**Last Updated**: 2026-02-01 (Redis client fix)
 **Status**: Ready for deployment
+
+---
+
+## ⚠️ CRITICAL FIX (2026-02-01): Redis Client Update
+
+**Issue**: The code was using `@vercel/kv` which expected `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables, but Vercel's native Upstash integration provides `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+
+**Root Cause**: After Vercel deprecated their own KV service, they migrated to native Upstash Redis integration. The `@vercel/kv` package still expected the old variable names, causing the error:
+```
+@vercel/kv: Missing required environment variables KV_REST_API_URL and KV_REST_API_TOKEN
+```
+
+**Solution**:
+- Replaced `@vercel/kv` package with native `@upstash/redis` SDK
+- Updated `src/lib/shiphero/auth.ts` to use `Redis` client from `@upstash/redis`
+- Now properly reads `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from environment
+- All log messages updated: "KV" → "Redis" for clarity
+
+**Files Changed**:
+- `package.json`: Replaced `@vercel/kv` with `@upstash/redis`
+- `src/lib/shiphero/auth.ts`: Updated Redis client initialization
+- `src/lib/env.ts`: Updated comments for Upstash Redis variables
 
 ---
 
@@ -30,7 +53,7 @@ This implementation fixes the token refresh error and adds manual backfill capab
 
 | File | Changes | Description |
 |------|---------|-------------|
-| `package.json` | Added `@vercel/kv: ^3.0.0` | Vercel KV client for token caching |
+| `package.json` | Replaced `@vercel/kv` with `@upstash/redis: ^1.36.1` | Native Upstash Redis client for token caching |
 | `src/lib/env.ts` | Added 5 env vars | KV config + backfill feature flags |
 | `src/lib/config.ts` | Added backfill config | Expose backfill flags to app |
 | `src/lib/shiphero/auth.ts` | 131 lines modified | Core token refresh fix + KV integration |
@@ -50,10 +73,11 @@ This implementation fixes the token refresh error and adds manual backfill capab
 # ============================================================
 # 1. Upstash Redis Configuration (Required for token persistence)
 # ============================================================
-# These are auto-added when you connect Upstash Redis native integration in Vercel
+# These are AUTO-ADDED when you connect Upstash Redis via Vercel Marketplace
+# No manual configuration needed - just link the database in Vercel Dashboard
 # Note: Vercel also adds UPSTASH_REDIS_REST_READ_ONLY_TOKEN (not used by our app)
-UPSTASH_REDIS_REST_URL=https://your-redis-instance.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your-upstash-token-here
+UPSTASH_REDIS_REST_URL=https://your-redis-instance.upstash.io  # Auto-added
+UPSTASH_REDIS_REST_TOKEN=your-upstash-token-here                # Auto-added
 
 # ============================================================
 # 2. Backfill Configuration (For manual backfill mode)
@@ -98,9 +122,11 @@ BACKFILL_START_DATE=2026-01-29 14:20:28
 
 ### Phase 1: Deploy Token Fix (Without Backfill)
 
-1. **Link Vercel KV Database**
-   - Go to Vercel project → Storage → Create KV Database
-   - Link to project (auto-adds `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`)
+1. **Link Upstash Redis Database**
+   - Go to Vercel project → Storage → Connect Database
+   - Select "Upstash Redis" from Marketplace (NOT "KV Database")
+   - Create new database or link existing one
+   - Vercel auto-adds `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` environment variables
 
 2. **Deploy to Production**
    ```bash
@@ -297,27 +323,27 @@ Cron Run #2 (00:10)
 └─ ERROR: Invalid token response ❌
 ```
 
-### After (With Vercel KV) ✅
+### After (With Upstash Redis) ✅
 
 ```
 Cron Run #1 (00:00)
-├─ Check KV → empty
+├─ Check Redis → empty
 ├─ Refresh token → get new access_token + expires_in
-├─ Store in KV with 28-day TTL
-├─ Log: "Token refreshed and cached in KV"
-└─ Function exits → token PERSISTED in KV ✅
+├─ Store in Redis with 28-day TTL
+├─ Log: "Token refreshed and cached in Redis"
+└─ Function exits → token PERSISTED in Redis ✅
 
 Cron Run #2 (00:10)
-├─ Check KV → found valid token
-├─ Log: "Using cached token from KV"
+├─ Check Redis → found valid token
+├─ Log: "Using cached token from Redis"
 └─ Return cached token (no refresh needed) ✅
 
 ... (repeat for 28 days)
 
 Cron Run #4032 (28 days later)
-├─ Check KV → expired
+├─ Check Redis → expired
 ├─ Refresh token → new access_token
-├─ Store in KV with new 28-day TTL
+├─ Store in Redis with new 28-day TTL
 └─ Cycle continues ✅
 ```
 
@@ -383,14 +409,14 @@ Cron Run #4032 (28 days later)
 
 ### Token Refresh Fix
 
-- [ ] Vercel KV database linked to project
-- [ ] `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` present in Vercel env vars
+- [ ] Upstash Redis database linked to project via Vercel Marketplace
+- [ ] `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` auto-added to Vercel env vars
 - [ ] Code deployed to production
-- [ ] First cron run logs: `"Token refreshed and cached in KV"`
-- [ ] Subsequent cron runs log: `"Using cached token from KV"`
-- [ ] No more "Invalid token response" errors
+- [ ] First cron run logs: `"Token refreshed and cached in Redis"`
+- [ ] Subsequent cron runs log: `"Using cached token from Redis"`
+- [ ] No more "Invalid token response" or "Missing required environment variables" errors
 - [ ] Orders fetched successfully
-- [ ] KV keys visible in Vercel dashboard: `shiphero:access_token`, `shiphero:expires_at`
+- [ ] Redis keys visible in Upstash dashboard: `shiphero:access_token`, `shiphero:expires_at`
 
 ### Backfill Feature
 
@@ -408,14 +434,15 @@ Cron Run #4032 (28 days later)
 
 ## Troubleshooting
 
-### Issue: "Invalid token response" still appearing
+### Issue: "Invalid token response" or "Missing required environment variables" still appearing
 
 **Check**:
-1. Is KV database linked? (Vercel → Storage)
-2. Are `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` set?
-3. Check Axiom for "Failed to cache token in KV" warnings
+1. Is Upstash Redis database linked? (Vercel → Storage → Upstash Redis)
+2. Are `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` set in Vercel env vars?
+3. Check Axiom for "Failed to cache token in Redis" warnings
+4. Verify you're using `@upstash/redis` package, NOT `@vercel/kv`
 
-**Solution**: If KV fails, code falls back to in-memory (less efficient but functional)
+**Solution**: If Redis fails, code falls back to in-memory (less efficient but functional)
 
 ### Issue: Cron ran during backfill setup
 
